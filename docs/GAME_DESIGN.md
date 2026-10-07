@@ -1,7 +1,7 @@
 # Wild Card Poker: Game Design Spec
 
-This document records the rules as the code implements them. Lines marked **[ASSUMED]** are my reading of
-something the designer has not spelled out yet; each one is a single setting in code and easy to change.
+This document records the rules as the code implements them. Lines marked **[CONFIRMED]** were answered by
+the designer. Lines marked **[ASSUMED]** are still my reading; each one is a single setting in code.
 See [Open questions](#open-questions).
 
 ---
@@ -16,7 +16,7 @@ player and not for another.
 
 | Term | Meaning |
 |---|---|
-| **In the hole / in the hand** | A player's face-down cards. **[ASSUMED]** Face-up rolled cards are *not* "in the hole" (setting: `WildCallOptions.HoleIncludesUpCards`). |
+| **In the hole / in the hand** | The cards in the player's hand (face down). **[CONFIRMED]** Rolled cards are on the table, so they are *not* "in the hole". |
 | **Up / rolled** | Cards a player has turned face up. |
 | **On the board** | Shared cards in the middle (the design board in Game 23). |
 
@@ -24,10 +24,10 @@ player and not for another.
 
 | # | Method | Example call | What becomes wild | Who it applies to |
 |---|---|---|---|---|
-| 1 | **Matching low** | "matching low" | Your lowest card in the hole, **and every card of that value** you can use (hole, rolled, board). | Each player separately |
+| 1 | **Matching low** | "matching low" | Your lowest card in the hole, **and every card of that value on the board and in your own cards**. Example: your low card is a deuce, so every deuce on the board and in your hand is wild for you. **[CONFIRMED]** | Each player separately: each player's own low card |
 | 2 | **Lowest/highest of a suit** | "lowest diamond in the hole" | Your lowest diamond in the hole. | Each player separately |
 | 2b | ...called on the board | "lowest diamond on the board" | The lowest diamond on the board. | Everyone (it's shared) |
-| 3 | **All like it** | "lowest club in the hole and all like it" | The picked card **plus every card of the same value** you can use. Example: player A's only club is the A♣, so all aces are wild for A. Player B's lowest club is the 3♣, so all treys are wild for B. | Each player separately |
+| 3 | **All like it** | "lowest club in the hole and all like it" | The picked card **plus every card of the same value** on the board and in your own cards. Example: player A's only club is the A♣, so all aces are wild for A. Player B's lowest club is the 3♣, so all treys are wild for B. **[CONFIRMED]** | Each player separately |
 | 4 | **Default (house rule #4)** | "highest club in the hole" | When a lowest/highest card is called, *all like it* applies **unless the caller says "only"** or "no matching low". | n/a |
 | 5 | **"Only"** | "lowest spade in the hole only, and no matching low" | That one card and nothing else. | Each player separately |
 | 6 | **Ranks in a location** | "queens or kings in the hole only" | Q and K in your hole (not on the board, not rolled). | Each player separately |
@@ -76,9 +76,8 @@ Every player ends with **7 cards: 3 down in the hole and 4 rolled face up**. The
 
 You must use the board, and you can't mix the two structures.
 
-**[ASSUMED]** Any 2 of the 7 cards on the "2", or any 3 of the 7 on the "3", may be used. If the board should
-only be used "a certain way" (for example, only cards that touch along the numeral's line), tell me the rule.
-The code has a single place for it (`Game23Engine.ShapesFor`).
+**[CONFIRMED]** Using the board is mandatory: exactly 2 cards from the "2" or exactly 3 from the "3".
+Any 2 of the 7 cards on the "2", or any 3 of the 7 on the "3", may be used.
 
 ### How a hand is dealt
 | Step | Dealer | Players |
@@ -86,23 +85,21 @@ The code has a single place for it (`Game23Engine.ShapesFor`).
 | 1 | Collects antes. | Ante. |
 | 2 | Lays out the design board: 7 cards face down in the shape of a **2**, 7 in the shape of a **3**. | n/a |
 | 3 | Deals **3 cards** to each player, face down. | n/a |
-| 4 | Turns **2 cards on the 2** and **2 cards on the 3**. | Each player **rolls** one hole card face up. Everyone picks at the same time, then all are revealed. **[ASSUMED]** |
+| 4 | Turns **2 cards on the 2** and **2 cards on the 3**. | Each player **rolls** one hole card face up, **one by one, starting left of the dealer**. Each roll is shown right away, so later players see it before choosing. **[CONFIRMED]** |
 | 5 | n/a | **Betting round.** |
 | 6 | Deals **1 more card** to each player; turns **2 + 2** more. | Roll one card. Betting round. |
 | 7 | Deals 1 card; turns **2 + 2** more. | Roll one card. Betting round. |
 | 8 | Deals 1 card; turns the **last card on each side (1 + 1)**, so all 14 are up. | Roll the 4th card. Betting round. |
 | 9 | Deals the **last card down**. It stays in the hole. | **Final betting round**, then showdown. |
 
-Board cards turned per round: **2, 2, 2, 1** on each side = 7 per side. **[ASSUMED]** You said "two at a time"
-and seven per side, so the last turn can only be one card. Setting: `Game23Settings.FlipSchedule`.
+Board cards turned per round: **2, 2, 2, 1** on each side = 7 per side. **[CONFIRMED]**
 
 **Player limit:** 14 board cards + 7 per player must fit in one 52-card deck, so the limit is **5 players**.
 
 ### Betting
 * Structures: **No-Limit, Pot-Limit or Fixed-Limit** (setting). Fixed-limit uses the small bet on rounds 1-2 and
   the big bet afterwards, with a cap of a bet plus three raises.
-* **[ASSUMED]** Betting starts with the first active player **left of the dealer** each round. Stud games often
-  start with the best face-up hand instead. Tell me which you want.
+* Betting starts with the first active player **left of the dealer** each round. **[CONFIRMED]**
 * All-ins and side pots follow standard card-room rules. A short all-in raise does not reopen the betting.
 
 ---
@@ -123,7 +120,8 @@ out-of-turn fold is binding; dealers warn and floors can penalize repeat offende
 | `AllowedWithWarning` **(default)** | The fold stands; the dealer warns the player ("Please wait for your turn"), and warnings are counted. |
 | `AllowedWithPenalty` | As above, and after N warnings the player **sits out the next hand**. |
 
-Folding while everyone is still choosing which card to roll is **not** out of turn, since nobody has the action yet.
+Rolling is one by one, so folding while **another player is rolling** is also out of turn. Folding when it is
+your own roll is an in-turn fold, and the roll passes to the next player.
 
 Computer players fold out of turn too. Impatient personalities (the Rookie and the Rock) sometimes fold weak
 hands before the action reaches them, and sometimes apologize: "Oops, my bad."
@@ -135,19 +133,14 @@ turn arrives.
 
 ## Open questions
 
-Please confirm or correct each of these. Every one is a single setting or function.
+Answered by the designer: "in the hole" (cards in the hand), matching low / all like it (each player's own low
+card, matched on the board and in their own cards), mandatory 2 or 3 board cards, the 2-2-2-1 flip schedule,
+one-by-one rolling, and betting from the dealer's left.
 
-1. **"In the hole"**: only face-down cards, or every card the player owns including rolled ones?
-2. **"All like it" scope**: your example says the A♣ makes aces wild *for player A only*, but an earlier line
-   says the matching card is wild "to you and the other players" if it's on the board. I implemented
-   **player A only**. Should a board card matched by "all like it" be wild for everyone?
-3. **Board "a certain way"**: any 2 of the 7 on the "2" and any 3 of the 7 on the "3", or must the cards be
-   connected along the numeral's line (or follow some other pattern)?
-4. **Flip schedule**: 2, 2, 2, 1 per side. Is that right?
-5. **Rolling**: do players roll at the same time (current), or one by one in turn order?
-6. **First to bet**: left of the dealer (current), or the best face-up hand?
-7. **Natural vs. wild** ties: split pot (current) or the natural hand wins?
-8. **Five of a Kind**: allowed and above the Royal Flush (current)?
-9. **Aces when picking "lowest club"**: does an ace count low (1) or high (current)?
-10. Should **"no matching low"** be the default instead of "all like it" (house rule #4 says "all like it" applies
-    unless the caller says otherwise, so that is the current default)?
+Still open (current behavior in brackets):
+
+1. **Natural vs. wild** ties: split pot, or does the natural hand win? (split pot)
+2. **Five of a Kind**: allowed and above the Royal Flush? (yes)
+3. **Aces when picking "lowest club"**: does an ace count low (1) or high? (high)
+4. **"No matching low" as the default** instead of "all like it" when a lowest/highest card is called? ("all like it",
+   per house rule #4)

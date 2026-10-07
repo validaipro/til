@@ -279,27 +279,55 @@ namespace WildCardPoker.Unity
             return _botRandom.NextDouble() < 0.15 ? WildCall.None : presets[_botRandom.Next(presets.Count)];
         }
 
+        /// <summary>
+        /// Game 23 rolls one by one from the dealer's left: each player sees the earlier rolls before choosing.
+        /// Called once per roll; the game loop calls it again for the next roller.
+        /// </summary>
         private IEnumerator RollingStep(PendingDecision pending)
         {
-            // Bots decide immediately; their choice stays hidden until everyone has chosen.
+            if (pending.ToAct < 0)
+            {
+                yield return SimultaneousRolls(pending);
+                yield break;
+            }
+
+            int roller = pending.ToAct;
+            HighlightTurn(roller);
+            if (roller == Human)
+            {
+                yield return HumanRoll();
+            }
+            else
+            {
+                _bar.ShowIdle(_seats[Human].InHand, $"{_seats[roller].Name} is choosing a card to roll...");
+                float end = Time.time + (0.6f + (float)_botRandom.NextDouble() * 0.8f) / Speed;
+                while (Time.time < end && _engine.CurrentRoller == roller) yield return null;
+                if (_engine.CurrentRoller == roller) _engine.SubmitRoll(roller, _bots[roller].ChooseRoll(_engine));
+            }
+            HighlightTurn(-1);
+        }
+
+        /// <summary>Optional house rule (<see cref="RollOrder.Simultaneous"/>): everyone picks, then all are revealed.</summary>
+        private IEnumerator SimultaneousRolls(PendingDecision pending)
+        {
             foreach (int seat in pending.RollSeats)
             {
-                if (seat == Human || _engine.Phase != Game23Phase.Rolling) continue;
-                if (!_engine.Pending.RollSeats.Contains(seat)) continue;
+                if (seat == Human || _engine.Phase != Game23Phase.Rolling || !_engine.Pending.RollSeats.Contains(seat)) continue;
                 _engine.SubmitRoll(seat, _bots[seat].ChooseRoll(_engine));
                 _views[seat].SetStatus("chose a roll");
             }
+            if (_engine.Phase == Game23Phase.Rolling && _engine.Pending.RollSeats.Contains(Human)) yield return HumanRoll();
+        }
 
-            if (_engine.Phase == Game23Phase.Rolling && _engine.Pending.RollSeats.Contains(Human))
-            {
-                _humanRoll = null;
-                SetHumanCardsSelectable(true);
-                _bar.ShowIdle(true, "Tap one of your hole cards to roll it face up.");
-                yield return new WaitUntil(() => _humanRoll != null || !_seats[Human].InHand || _engine.Phase != Game23Phase.Rolling);
-                SetHumanCardsSelectable(false);
-                if (_humanRoll != null && _engine.Phase == Game23Phase.Rolling && _engine.Pending.RollSeats.Contains(Human))
-                    _engine.SubmitRoll(Human, _humanRoll.Value);
-            }
+        private IEnumerator HumanRoll()
+        {
+            _humanRoll = null;
+            SetHumanCardsSelectable(true);
+            _bar.ShowIdle(true, "Your roll: tap one of your hole cards to turn it face up.");
+            yield return new WaitUntil(() => _humanRoll != null || !_seats[Human].InHand || _engine.Phase != Game23Phase.Rolling);
+            SetHumanCardsSelectable(false);
+            if (_humanRoll != null && _engine.Phase == Game23Phase.Rolling && _engine.Pending.RollSeats.Contains(Human))
+                _engine.SubmitRoll(Human, _humanRoll.Value);
         }
 
         private IEnumerator BettingStep(PendingDecision pending)
@@ -433,7 +461,7 @@ namespace WildCardPoker.Unity
             }
             bool inTurn = _engine.Phase == Game23Phase.Betting && _engine.Pending.ToAct == Human;
             if (inTurn) _humanAction = PlayerAction.Fold();
-            else _engine.Fold(Human); // out of turn (or while choosing rolls): the engine applies table policy
+            else _engine.Fold(Human); // while someone else bets or rolls: out of turn, the engine applies table policy
         }
 
         // ------------------------------------------------------------------ event playback
@@ -497,8 +525,8 @@ namespace WildCardPoker.Unity
                     RefreshWilds();
                     break;
 
-                case RollRequestedEvent _:
-                    foreach (var v in _views) if (_seats[v.SeatIndex].InHand) v.SetStatus("choosing...");
+                case RollRequestedEvent request:
+                    foreach (int s in request.Seats) _views[s].SetStatus("rolling...");
                     break;
 
                 case CardRolledEvent rolled:

@@ -19,6 +19,15 @@ namespace WildCardPoker.Core.Game23
         AllowedWithPenalty,
     }
 
+    public enum RollOrder
+    {
+        /// <summary>Players roll one at a time, starting left of the dealer; each roll is shown immediately.</summary>
+        OneByOne,
+
+        /// <summary>Everyone picks a card secretly, then all rolls are revealed together.</summary>
+        Simultaneous,
+    }
+
     public enum Game23Phase
     {
         NotStarted,
@@ -48,6 +57,9 @@ namespace WildCardPoker.Core.Game23
         /// <summary>After the last roll each player gets one more card that stays down in the hole.</summary>
         public bool FinalDownCard = true;
 
+        /// <summary>Game 23 rule: players roll one by one, starting from the dealer's left.</summary>
+        public RollOrder Rolling = RollOrder.OneByOne;
+
         /// <summary>Mandatory wilds for Game 23: deuces and treys.</summary>
         public WildCall MandatoryWilds = WildCallPresets.DeucesAndTreys();
 
@@ -75,10 +87,13 @@ namespace WildCardPoker.Core.Game23
     {
         public Game23Phase Phase { get; }
 
-        /// <summary>Seats that still have to choose a card to roll.</summary>
+        /// <summary>
+        /// Seats that may roll right now: only the current roller when rolling one by one,
+        /// or everyone still choosing when rolling simultaneously.
+        /// </summary>
         public IReadOnlyList<int> RollSeats { get; }
 
-        /// <summary>Seat that must act in the betting round, or -1.</summary>
+        /// <summary>Seat whose turn it is (to bet, or to roll when rolling one by one), or -1.</summary>
         public int ToAct { get; }
 
         public LegalActions Legal { get; }
@@ -96,8 +111,9 @@ namespace WildCardPoker.Core.Game23
     /// Rules engine for "23 (MJ)": a seven-card rolling game with a 14-card design board shaped like a 2 and a 3.
     ///
     /// Flow per hand: antes; the dealer lays out the board face down; each player gets three hole cards;
-    /// then for each street the dealer turns cards on both sides (2,2,2,1 by default), every player rolls one of
-    /// their hole cards face up (choices are revealed together), and a betting round follows. From the second
+    /// then for each street the dealer turns cards on both sides (2,2,2,1), every player rolls one of their hole
+    /// cards face up, one by one starting left of the dealer, and a betting round follows (also starting left of
+    /// the dealer). From the second
     /// street on each player is dealt one more hole card before the flip. After the fourth roll a final card is
     /// dealt down, there is a last betting round and a showdown. Everyone finishes with 4 up and 3 down.
     ///
@@ -111,7 +127,8 @@ namespace WildCardPoker.Core.Game23
         private readonly IRandomSource _random;
         private readonly List<GameEvent> _events = new List<GameEvent>();
         private readonly Dictionary<int, Card> _rollChoices = new Dictionary<int, Card>();
-        private readonly HashSet<int> _rollPending = new HashSet<int>();
+        /// <summary>Seats still to roll this street, in turn order (left of the dealer first).</summary>
+        private readonly List<int> _rollQueue = new List<int>();
         private readonly BestHandFinder _finder;
 
         private Deck _deck;
@@ -148,6 +165,10 @@ namespace WildCardPoker.Core.Game23
 
         public long PotTotal => _seats.Sum(s => s.TotalBet);
 
+        /// <summary>When rolling one by one: the seat that must roll now, else -1.</summary>
+        public int CurrentRoller =>
+            Phase == Game23Phase.Rolling && Settings.Rolling == RollOrder.OneByOne && _rollQueue.Count > 0 ? _rollQueue[0] : -1;
+
         /// <summary>True when events are waiting to be drained.</summary>
         public bool HasEvents => _events.Count > 0;
 
@@ -168,7 +189,9 @@ namespace WildCardPoker.Core.Game23
                 switch (Phase)
                 {
                     case Game23Phase.Rolling:
-                        return new PendingDecision(Phase, _rollPending.OrderBy(x => x).ToArray(), -1, null);
+                        return Settings.Rolling == RollOrder.OneByOne
+                            ? new PendingDecision(Phase, _rollQueue.Take(1).ToArray(), CurrentRoller, null)
+                            : new PendingDecision(Phase, _rollQueue.ToArray(), -1, null);
                     case Game23Phase.Betting:
                         return new PendingDecision(Phase, Array.Empty<int>(), _round.ToAct,
                             _round.ToAct >= 0 ? _round.Legal(_round.ToAct) : null);
@@ -208,7 +231,7 @@ namespace WildCardPoker.Core.Game23
             _finalCardDealt = false;
             _round = null;
             _rollChoices.Clear();
-            _rollPending.Clear();
+            _rollQueue.Clear();
 
             _deck = presetDeck ?? new Deck();
             if (presetDeck == null) _deck.Shuffle(_random);
@@ -232,15 +255,29 @@ namespace WildCardPoker.Core.Game23
             Continue();
         }
 
-        /// <summary>A player chooses which hole card to roll face up. Choices are revealed together.</summary>
+        /// <summary>
+        /// A player rolls one hole card face up. One by one (Game 23): only <see cref="CurrentRoller"/> may roll and
+        /// the card is shown at once. Simultaneous: choices stay hidden until everyone has chosen.
+        /// </summary>
         public void SubmitRoll(int seatIndex, Card card)
         {
             if (Phase != Game23Phase.Rolling) throw new InvalidOperationException("Not in the rolling phase.");
-            if (!_rollPending.Contains(seatIndex)) throw new InvalidOperationException($"Seat {seatIndex} has nothing to roll.");
+            if (!_rollQueue.Contains(seatIndex)) throw new InvalidOperationException($"Seat {seatIndex} has nothing to roll.");
+            if (Settings.Rolling == RollOrder.OneByOne && _rollQueue[0] != seatIndex)
+                throw new InvalidOperationException($"It is seat {_rollQueue[0]}'s turn to roll, not seat {seatIndex}'s.");
             var seat = _seats[seatIndex];
             if (!seat.Hole.Contains(card)) throw new InvalidOperationException($"{card} is not in seat {seatIndex}'s hole.");
-            _rollChoices[seatIndex] = card;
-            _rollPending.Remove(seatIndex);
+            _rollQueue.Remove(seatIndex);
+
+            if (Settings.Rolling == RollOrder.OneByOne)
+            {
+                Roll(seat, card);
+                if (_rollQueue.Count > 0) _events.Add(new RollRequestedEvent(new[] { _rollQueue[0] }));
+            }
+            else
+            {
+                _rollChoices[seatIndex] = card;
+            }
             Continue();
         }
 
@@ -271,17 +308,19 @@ namespace WildCardPoker.Core.Game23
                 return true;
             }
 
-            int expected = Phase == Game23Phase.Betting && _round != null ? _round.ToAct : -1;
-            // Folding while everyone is choosing a roll is not "out of turn" - nobody has the action.
-            bool outOfTurn = expected >= 0;
+            // Whose turn it is: the bettor, or the current roller when rolling one by one.
+            // (In simultaneous rolling nobody has the action, so a fold then is never out of turn.)
+            int expected = Phase == Game23Phase.Betting && _round != null ? _round.ToAct : CurrentRoller;
+            bool outOfTurn = expected >= 0 && expected != seatIndex;
             if (outOfTurn && Settings.OutOfTurnFolds == OutOfTurnFoldPolicy.NotAllowed)
             {
                 _events.Add(new OutOfTurnRejectedEvent(seatIndex));
                 return false;
             }
 
+            bool wasRoller = CurrentRoller == seatIndex;
             seat.Status = SeatStatus.Folded;
-            _rollPending.Remove(seatIndex);
+            _rollQueue.Remove(seatIndex);
             _rollChoices.Remove(seatIndex);
             _round?.RemoveFolded(seatIndex);
 
@@ -303,6 +342,10 @@ namespace WildCardPoker.Core.Game23
             {
                 _events.Add(new ActionEvent(seatIndex, PlayerAction.Fold(), 0, false));
             }
+
+            // The roll passes to the next player if the current roller folded.
+            if (wasRoller && _rollQueue.Count > 0 && _seats.Count(s => s.InHand) > 1)
+                _events.Add(new RollRequestedEvent(new[] { _rollQueue[0] }));
 
             Continue();
             return true;
@@ -357,7 +400,7 @@ namespace WildCardPoker.Core.Game23
 
                 if (Phase == Game23Phase.Rolling)
                 {
-                    if (_rollPending.Count > 0) return;
+                    if (_rollQueue.Count > 0) return;
                     RevealRolls();
                     BeginBetting();
                     continue;
@@ -404,22 +447,26 @@ namespace WildCardPoker.Core.Game23
         {
             Phase = Game23Phase.Rolling;
             _rollChoices.Clear();
-            _rollPending.Clear();
-            foreach (var s in _seats)
-                if (s.InHand && s.Hole.Count > 0) _rollPending.Add(s.Index);
-            _events.Add(new RollRequestedEvent(_rollPending.OrderBy(x => x).ToArray()));
+            _rollQueue.Clear();
+            foreach (var s in DealOrder())
+                if (s.Hole.Count > 0) _rollQueue.Add(s.Index);
+            var asked = Settings.Rolling == RollOrder.OneByOne ? _rollQueue.Take(1).ToArray() : _rollQueue.ToArray();
+            if (asked.Length > 0) _events.Add(new RollRequestedEvent(asked));
         }
 
+        /// <summary>Simultaneous rolling: show everyone's choice together, in turn order.</summary>
         private void RevealRolls()
         {
             foreach (var s in DealOrder())
-            {
-                if (!_rollChoices.TryGetValue(s.Index, out var card)) continue;
-                s.Hole.Remove(card);
-                s.Up.Add(card);
-                _events.Add(new CardRolledEvent(s.Index, card));
-            }
+                if (_rollChoices.TryGetValue(s.Index, out var card)) Roll(s, card);
             _rollChoices.Clear();
+        }
+
+        private void Roll(Seat seat, Card card)
+        {
+            seat.Hole.Remove(card);
+            seat.Up.Add(card);
+            _events.Add(new CardRolledEvent(seat.Index, card));
         }
 
         private void BeginBetting()
@@ -520,7 +567,7 @@ namespace WildCardPoker.Core.Game23
         {
             Phase = Game23Phase.HandOver;
             _round = null;
-            _rollPending.Clear();
+            _rollQueue.Clear();
             _rollChoices.Clear();
             _events.Add(new HandEndedEvent());
         }

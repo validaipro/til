@@ -12,6 +12,16 @@ namespace WildCardPoker.Tests
         private static List<Seat> Seats(int count, long stack = 1000) =>
             Enumerable.Range(0, count).Select(i => new Seat(i, "P" + i, stack)).ToList();
 
+        /// <summary>Rolls for every player in turn (each rolls their first hole card) until betting starts.</summary>
+        private static void RollAll(Game23Engine engine)
+        {
+            while (engine.Phase == Game23Phase.Rolling)
+            {
+                int seat = engine.Pending.RollSeats[0];
+                engine.SubmitRoll(seat, engine.Seats[seat].Hole[0]);
+            }
+        }
+
         /// <summary>Plays the engine forward: everyone rolls their first hole card and checks/calls.</summary>
         private static void PlayPassively(Game23Engine engine)
         {
@@ -46,10 +56,12 @@ namespace WildCardPoker.Tests
                 var pending = engine.Pending;
                 if (pending.Phase == Game23Phase.Rolling)
                 {
-                    // Before each roll, each player holds 3 cards in the hole.
-                    foreach (var s in pending.RollSeats) Assert.AreEqual(3, engine.Seats[s].Hole.Count);
+                    // One player rolls at a time, holding 3 cards in the hole before rolling.
+                    Assert.AreEqual(1, pending.RollSeats.Count);
+                    int roller = pending.RollSeats[0];
+                    Assert.AreEqual(3, engine.Seats[roller].Hole.Count);
                     checkedRolls++;
-                    foreach (var s in pending.RollSeats.ToList()) engine.SubmitRoll(s, engine.Seats[s].Hole.Last());
+                    engine.SubmitRoll(roller, engine.Seats[roller].Hole.Last());
                 }
                 else if (pending.ToAct >= 0)
                 {
@@ -57,7 +69,7 @@ namespace WildCardPoker.Tests
                 }
             }
 
-            Assert.AreEqual(4, checkedRolls);
+            Assert.AreEqual(4 * 5, checkedRolls, "four rolls for each of five players");
             Assert.AreEqual(7, engine.Board.FlippedTwo);
             Assert.AreEqual(7, engine.Board.FlippedThree);
             foreach (var s in seats)
@@ -82,11 +94,85 @@ namespace WildCardPoker.Tests
                 {
                     flips.Add(engine.Board.FlippedTwo);
                     Assert.AreEqual(engine.Board.FlippedTwo, engine.Board.FlippedThree);
-                    foreach (var s in pending.RollSeats.ToList()) engine.SubmitRoll(s, engine.Seats[s].Hole[0]);
+                    RollAll(engine);
                 }
                 else engine.Act(pending.ToAct, PlayerAction.Check());
             }
             CollectionAssert.AreEqual(new[] { 2, 4, 6, 7 }, flips);
+        }
+
+        [Test]
+        public void PlayersRollOneByOneStartingLeftOfTheDealer()
+        {
+            var engine = new Game23Engine(Game23Settings.Default, Seats(4), new SeededRandom(21));
+            engine.StartHand(WildCall.None);
+            int dealer = engine.DealerSeat;
+            var order = new List<int>();
+            while (engine.Phase == Game23Phase.Rolling)
+            {
+                var pending = engine.Pending;
+                Assert.AreEqual(1, pending.RollSeats.Count, "only one player may roll at a time");
+                int roller = pending.RollSeats[0];
+                Assert.AreEqual(roller, pending.ToAct);
+
+                // Nobody else may roll out of turn.
+                int other = (roller + 1) % 4;
+                Assert.Throws<System.InvalidOperationException>(() => engine.SubmitRoll(other, engine.Seats[other].Hole[0]));
+
+                var card = engine.Seats[roller].Hole[0];
+                engine.DrainEvents();
+                engine.SubmitRoll(roller, card);
+                // The roll is shown immediately, before the next player chooses.
+                Assert.Contains(card, engine.Seats[roller].Up);
+                Assert.AreEqual(card, engine.DrainEvents().OfType<CardRolledEvent>().Single().Card);
+                order.Add(roller);
+            }
+            CollectionAssert.AreEqual(new[] { (dealer + 1) % 4, (dealer + 2) % 4, (dealer + 3) % 4, dealer }, order);
+        }
+
+        [Test]
+        public void BettingStartsLeftOfTheDealer()
+        {
+            var engine = new Game23Engine(Game23Settings.Default, Seats(4), new SeededRandom(8));
+            engine.StartHand(WildCall.None);
+            RollAll(engine);
+            Assert.AreEqual(Game23Phase.Betting, engine.Phase);
+            Assert.AreEqual((engine.DealerSeat + 1) % 4, engine.Pending.ToAct);
+        }
+
+        [Test]
+        public void FoldingWhileAnotherPlayerRollsIsOutOfTurn()
+        {
+            var engine = new Game23Engine(Game23Settings.Default, Seats(4), new SeededRandom(13));
+            engine.StartHand(WildCall.None);
+            int roller = engine.CurrentRoller;
+            int folder = (roller + 2) % 4;
+            engine.DrainEvents();
+            Assert.IsTrue(engine.Fold(folder));
+            var ev = engine.DrainEvents().OfType<OutOfTurnFoldEvent>().Single();
+            Assert.AreEqual(roller, ev.ExpectedSeat);
+            Assert.AreEqual(roller, engine.CurrentRoller, "the roll stays with the same player");
+
+            // The roller folding in turn passes the roll to the next player, with no warning.
+            Assert.IsTrue(engine.Fold(roller));
+            Assert.IsEmpty(engine.DrainEvents().OfType<OutOfTurnFoldEvent>());
+            Assert.AreNotEqual(roller, engine.CurrentRoller);
+            PlayPassively(engine);
+            Assert.AreEqual(4000, engine.Seats.Sum(s => s.Stack));
+        }
+
+        [Test]
+        public void SimultaneousRollingIsStillAvailableAsAnOption()
+        {
+            var settings = new Game23Settings { Rolling = RollOrder.Simultaneous };
+            var engine = new Game23Engine(settings, Seats(3), new SeededRandom(4));
+            engine.StartHand(WildCall.None);
+            Assert.AreEqual(3, engine.Pending.RollSeats.Count);
+            int first = engine.Pending.RollSeats[0];
+            engine.SubmitRoll(first, engine.Seats[first].Hole[0]);
+            Assert.IsEmpty(engine.Seats[first].Up, "hidden until everyone has chosen");
+            RollAll(engine);
+            Assert.IsTrue(engine.Seats.All(s => s.Up.Count == 1));
         }
 
         [Test]
@@ -134,7 +220,7 @@ namespace WildCardPoker.Tests
         {
             var engine = new Game23Engine(Game23Settings.Default, Seats(4), new SeededRandom(5));
             engine.StartHand(WildCall.None);
-            foreach (var s in engine.Pending.RollSeats.ToList()) engine.SubmitRoll(s, engine.Seats[s].Hole[0]);
+            RollAll(engine);
             engine.DrainEvents();
 
             var pending = engine.Pending;
@@ -160,7 +246,7 @@ namespace WildCardPoker.Tests
             var settings = new Game23Settings { OutOfTurnFolds = OutOfTurnFoldPolicy.NotAllowed };
             var engine = new Game23Engine(settings, Seats(3), new SeededRandom(5));
             engine.StartHand(WildCall.None);
-            foreach (var s in engine.Pending.RollSeats.ToList()) engine.SubmitRoll(s, engine.Seats[s].Hole[0]);
+            RollAll(engine);
             int folder = (engine.Pending.ToAct + 1) % 3;
             Assert.IsFalse(engine.Fold(folder));
             Assert.AreEqual(SeatStatus.Active, engine.Seats[folder].Status);
@@ -172,7 +258,7 @@ namespace WildCardPoker.Tests
             var settings = new Game23Settings { OutOfTurnFolds = OutOfTurnFoldPolicy.AllowedWithPenalty, WarningsBeforePenalty = 1 };
             var engine = new Game23Engine(settings, Seats(3), new SeededRandom(9));
             engine.StartHand(WildCall.None);
-            foreach (var s in engine.Pending.RollSeats.ToList()) engine.SubmitRoll(s, engine.Seats[s].Hole[0]);
+            RollAll(engine);
             int folder = (engine.Pending.ToAct + 1) % 3;
             engine.Fold(folder);
             Assert.IsTrue(engine.DrainEvents().OfType<OutOfTurnFoldEvent>().Single().Penalized);
@@ -224,7 +310,8 @@ namespace WildCardPoker.Tests
                     var pending = engine.Pending;
                     if (pending.Phase == Game23Phase.Rolling)
                     {
-                        foreach (var s in pending.RollSeats.ToList()) engine.SubmitRoll(s, bots[s].ChooseRoll(engine));
+                        int roller = pending.RollSeats[0];
+                        engine.SubmitRoll(roller, bots[roller].ChooseRoll(engine));
                         continue;
                     }
                     // Give impatient bots a chance to fold before their turn.

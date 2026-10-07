@@ -32,6 +32,27 @@ namespace WildCardPoker.Tests
         }
 
         [Test]
+        public void MatchingLow_EachPlayersOwnLowCardMatchesOnTheBoardAndInTheirHand()
+        {
+            // Designer's example: if a player's low card is a deuce, every deuce on the board and in that
+            // player's hand is wild for them. Another player's low card is a 4, so 4s are wild for them instead.
+            var call = Parse("matching low");
+            const string board = "2s 4d 9c";
+            var playerA = Ctx(hole: "2c 9d Kh", up: "2h 7s", board: board);
+            var playerB = Ctx(hole: "4c 8d Qh", up: "Jh", board: board);
+            Assert.AreEqual("2c 2h 2s", Wilds(call, playerA));
+            Assert.AreEqual("4c 4d", Wilds(call, playerB));
+        }
+
+        [Test]
+        public void InTheHoleMeansTheCardsInTheHandNotRolledCards()
+        {
+            // The rolled 4c is on the table, not in the hand, so the lowest club in the hole is the 9c.
+            var ctx = Ctx(hole: "9c Kd", up: "4c");
+            Assert.AreEqual("9c", Wilds(Parse("lowest club in the hole only"), ctx));
+        }
+
+        [Test]
         public void LowestDiamondInTheHole_OnlyThatCard()
         {
             var ctx = Ctx(hole: "9d 5d Ac", up: "5h", board: "5s");

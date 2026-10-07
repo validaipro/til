@@ -85,7 +85,8 @@ namespace WildCardPoker.Core
     {
         public IReadOnlyList<int> Seats { get; }
         public RollRequestedEvent(IReadOnlyList<int> seats) { Seats = seats; }
-        public override string Narration => "Players, choose a card to roll.";
+        public override string Narration =>
+            Seats.Count == 1 ? $"Seat {Seats[0]} to roll." : "Players, choose a card to roll.";
     }
 
     public sealed class CardRolledEvent : GameEvent
