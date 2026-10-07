@@ -1,0 +1,17 @@
+{
+    "name": "WildCardPoker.Runtime",
+    "rootNamespace": "WildCardPoker.Unity",
+    "references": [
+        "WildCardPoker.Core",
+        "UnityEngine.UI"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
