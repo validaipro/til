@@ -54,7 +54,7 @@ realistically.
 * "Low hole card wild", with the lowest hole card wild **for that player alone**, is a classic home game[^home1][^home2].
 * *Follow the Queen*, where the card after an exposed queen becomes wild, is a dealer's-choice staple[^ftq].
 * Dealer's choice games often use "two or three rows of community cards"[^home2], which is the same family as
-  Game 23's design board.
+  Diamond Turn-over's two-row board.
 
 ✅ The wild card calling system works per player, so hole-card wilds count for one player only. 🔜 Follow the
 Queen is a natural next calling method (the wild changes as cards are dealt).

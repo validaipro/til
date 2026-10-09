@@ -34,6 +34,7 @@ namespace WildCardPoker.Unity
         private Image _avatar;
         private Text _avatarInitial;
         private Image _dealerButton;
+        private Image _highHandTag;
         private Image _timer;
         private RectTransform _bubble;
         private Text _bubbleText;
@@ -100,6 +101,12 @@ namespace WildCardPoker.Unity
             _dealerButton.enabled = false;
             d.enabled = false;
 
+            _highHandTag = Ui.Image("HighHand", transform, Theme.Panel, Theme.HighHandGlow, sliced: true);
+            _highHandTag.rectTransform.Place(new Vector2(-62, 46), new Vector2(118, 26));
+            var tagText = Ui.Text("Label", _highHandTag.transform, "HIGH HAND", 15, Theme.CardBlack, TextAnchor.MiddleCenter, FontStyle.Bold);
+            tagText.rectTransform.Stretch();
+            _highHandTag.gameObject.SetActive(false);
+
             _bubble = Ui.Image("Bubble", transform, Theme.Panel, new Color(1, 1, 1, 0.95f), sliced: true).rectTransform;
             _bubble.Place(new Vector2(0, 86), new Vector2(250, 48));
             _bubbleText = Ui.Text("Say", _bubble, "", 19, Theme.CardBlack, TextAnchor.MiddleCenter, FontStyle.Bold);
@@ -110,6 +117,18 @@ namespace WildCardPoker.Unity
         public void SetStack(long stack) => _stack.text = stack.ToString("N0");
 
         public void SetStatus(string text) => _status.text = text ?? "";
+
+        /// <summary>Flashing "HIGH HAND" tag: this player has the highest hand showing at the table.</summary>
+        public void SetHighHand(bool on) => _highHandTag.gameObject.SetActive(on);
+
+        private void Update()
+        {
+            if (!_highHandTag.gameObject.activeSelf) return;
+            float k = 0.5f + 0.5f * Mathf.Sin(Time.unscaledTime * 3.5f);
+            var c = Theme.HighHandGlow;
+            c.a = Mathf.Lerp(0.45f, 1f, k);
+            _highHandTag.color = c;
+        }
 
         public void SetDealer(bool isDealer)
         {

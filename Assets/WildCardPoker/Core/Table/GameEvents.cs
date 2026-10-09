@@ -44,10 +44,22 @@ namespace WildCardPoker.Core
         public override string Narration => $"Seat {Seat} antes {Amount}.";
     }
 
-    /// <summary>The dealer lays the 14 design-board cards face down.</summary>
+    /// <summary>
+    /// The dealer lays out the board: two rows of five. Each entry is the card when it is dealt face up,
+    /// or null when it is face down (players must not learn hidden cards).
+    /// </summary>
     public sealed class BoardSetEvent : GameEvent
     {
-        public override string Narration => "The dealer sets up the board: seven cards in the 2, seven in the 3.";
+        public IReadOnlyList<Card?> Row1 { get; }
+        public IReadOnlyList<Card?> Row2 { get; }
+
+        public BoardSetEvent(IReadOnlyList<Card?> row1, IReadOnlyList<Card?> row2)
+        {
+            Row1 = row1;
+            Row2 = row2;
+        }
+
+        public override string Narration => "The dealer sets up the board: two rows of five, alternating up and down.";
     }
 
     public sealed class CardDealtEvent : GameEvent
@@ -64,21 +76,52 @@ namespace WildCardPoker.Core
         public override string Narration => $"Seat {Seat} is dealt a card.";
     }
 
-    public sealed class BoardCardFlippedEvent : GameEvent
+    /// <summary>A player may ask the dealer to turn over a board column, or pass.</summary>
+    public sealed class TurnOverOfferedEvent : GameEvent
     {
-        /// <summary>2 or 3: which structure of the design board.</summary>
-        public int Side { get; }
-        public int Slot { get; }
-        public Card Card { get; }
+        public int Seat { get; }
+        public string Reason { get; }
 
-        public BoardCardFlippedEvent(int side, int slot, Card card)
+        public TurnOverOfferedEvent(int seat, string reason)
         {
-            Side = side;
-            Slot = slot;
-            Card = card;
+            Seat = seat;
+            Reason = reason;
         }
 
-        public override string Narration => $"The {Side} side shows {Card.ToPrettyString()}.";
+        public override string Narration => $"Seat {Seat} {Reason} and may turn over a card.";
+    }
+
+    /// <summary>The dealer turned a column over: one card came up, the other went down.</summary>
+    public sealed class ColumnTurnedEvent : GameEvent
+    {
+        public int Seat { get; }
+
+        /// <summary>0-based column.</summary>
+        public int Column { get; }
+
+        /// <summary>The card now face up in this column.</summary>
+        public Card Revealed { get; }
+
+        /// <summary>Row (1 or 2) of the revealed card. The other row's card is now face down.</summary>
+        public int RevealedRow { get; }
+
+        public ColumnTurnedEvent(int seat, int column, Card revealed, int revealedRow)
+        {
+            Seat = seat;
+            Column = column;
+            Revealed = revealed;
+            RevealedRow = revealedRow;
+        }
+
+        public override string Narration =>
+            $"Seat {Seat} turns over column {Column + 1}: {Revealed.ToPrettyString()} is up in row {RevealedRow}.";
+    }
+
+    public sealed class TurnOverPassedEvent : GameEvent
+    {
+        public int Seat { get; }
+        public TurnOverPassedEvent(int seat) { Seat = seat; }
+        public override string Narration => $"Seat {Seat} passes on the turn-over.";
     }
 
     public sealed class RollRequestedEvent : GameEvent

@@ -14,6 +14,8 @@ namespace WildCardPoker.Unity
     public sealed class CardView : MonoBehaviour, IPointerClickHandler, IPointerEnterHandler, IPointerExitHandler
     {
         private Image _glow;
+        private Image _highlight;
+        private Color _highlightColor;
         private Image _face;
         private Image _back;
         private Text _cornerTop;
@@ -47,8 +49,12 @@ namespace WildCardPoker.Unity
         {
             float s = size.y / 118f; // design scale
 
+            _highlight = Ui.Image("Highlight", transform, Theme.Panel, Theme.BestHandGlow, sliced: true);
+            _highlight.rectTransform.Stretch(-10 * s);
+            _highlight.enabled = false;
+
             _glow = Ui.Image("Glow", transform, Theme.Panel, Theme.WildGlow, sliced: true);
-            _glow.rectTransform.Stretch(-7 * s);
+            _glow.rectTransform.Stretch(-6 * s);
             _glow.enabled = false;
 
             var shadow = Ui.Image("Shadow", transform, Theme.CardFace, new Color(0, 0, 0, 0.35f), sliced: true);
@@ -92,10 +98,45 @@ namespace WildCardPoker.Unity
             Refresh();
         }
 
+        /// <summary>Wild cards flash gold with a WILD tag.</summary>
         public void SetWild(bool wild)
         {
             _glow.enabled = wild && FaceUp;
             _wildTag.enabled = wild && FaceUp;
+        }
+
+        /// <summary>
+        /// A second, slower flashing outline: the cards making up a player's best hand, or the up cards of the
+        /// highest hand showing. Pass null to clear.
+        /// </summary>
+        public void SetHighlight(Color? color)
+        {
+            _highlight.enabled = color.HasValue && FaceUp;
+            if (color.HasValue) _highlightColor = color.Value;
+        }
+
+        private void Update()
+        {
+            float t = Time.unscaledTime;
+            if (_glow.enabled)
+            {
+                // Quick gold pulse for wild cards.
+                float k = 0.5f + 0.5f * Mathf.Sin(t * 6f);
+                var c = Theme.WildGlow;
+                c.a = Mathf.Lerp(0.3f, 1f, k);
+                _glow.color = c;
+                var tag = _wildTag.color;
+                tag.a = Mathf.Lerp(0.55f, 1f, k);
+                _wildTag.color = tag;
+            }
+            if (_highlight.enabled)
+            {
+                // Slower pulse, out of phase with the wild flash so both read at once.
+                float k = 0.5f + 0.5f * Mathf.Sin(t * 3.5f + 1.6f);
+                var c = _highlightColor;
+                c.a = Mathf.Lerp(0.15f, 0.9f, k);
+                _highlight.color = c;
+            }
         }
 
         /// <summary>Dim a card that is not part of the winning five.</summary>
@@ -112,6 +153,8 @@ namespace WildCardPoker.Unity
             if (!FaceUp)
             {
                 _glow.enabled = false;
+                _wildTag.enabled = false;
+                _highlight.enabled = false;
                 return;
             }
             var color = Card.IsRed ? Theme.CardRed : Theme.CardBlack;

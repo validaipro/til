@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using WildCardPoker.Core.Game23;
+using WildCardPoker.Core.DiamondTurnOver;
 
 namespace WildCardPoker.Core.AI
 {
@@ -26,14 +26,14 @@ namespace WildCardPoker.Core.AI
     }
 
     /// <summary>
-    /// A computer player for Game 23. It only reads information its seat could see at a real table:
-    /// its own cards, everyone's rolled cards and the exposed board. Hand strength comes from Monte Carlo simulation
-    /// of the unseen cards with the hand's wild card call applied, so bots understand personal wilds.
+    /// A computer player for Diamond Turn-over. It only reads what its seat could see at a real table: its own cards,
+    /// everyone's rolled cards and the face-up board. Hand strength comes from simulating the unseen cards with the
+    /// wild card rule applied, so it understands its own wild diamonds.
     /// </summary>
-    public sealed class Game23Bot
+    public sealed class DiamondBot
     {
         private readonly IRandomSource _random;
-        private (int hand, int street, int players, int upCards) _cacheKey = (-1, -1, -1, -1);
+        private (int hand, int round, int players, int upCards, string board) _cacheKey = (-1, -1, -1, -1, null);
         private double _cachedEquity;
 
         public PlayerProfile Profile { get; }
@@ -44,7 +44,7 @@ namespace WildCardPoker.Core.AI
 
         public int Samples { get; set; } = 80;
 
-        public Game23Bot(int seatIndex, PlayerProfile profile, IRandomSource random)
+        public DiamondBot(int seatIndex, PlayerProfile profile, IRandomSource random)
         {
             SeatIndex = seatIndex;
             Profile = profile ?? new PlayerProfile();
@@ -55,7 +55,7 @@ namespace WildCardPoker.Core.AI
         private float Aggro => Clamp01(Profile.Aggression + Tilt * 0.3f);
 
         /// <summary>Chooses which hole card to roll face up.</summary>
-        public Card ChooseRoll(Game23Engine engine)
+        public Card ChooseRoll(DiamondTurnOverEngine engine)
         {
             var seat = engine.Seats[SeatIndex];
             var personal = seat.PersonalCards.ToList();
@@ -67,15 +67,15 @@ namespace WildCardPoker.Core.AI
             {
                 var hole = seat.Hole.Where(c => c != candidate).ToList();
                 var up = seat.Up.Concat(new[] { candidate }).ToList();
-                var wilds = engine.EffectiveCall.Resolve(new WildContext(hole, up, engine.Board.AllExposed, engine.Settings.WildOptions));
+                var wilds = engine.Settings.Wilds.Resolve(new WildContext(hole, up, engine.Board.AllFaceUp));
                 var value = engine.Finder.BestValueOfShapes(personal, shapes, wilds);
 
-                // Primary: hand strength under the resulting wilds (rolling can change "in the hole" wilds).
+                // Primary: strength under the resulting wilds (rolling a diamond changes the lowest diamond in the hole).
                 double score = value.IsValid ? value.Strength : 0;
-                // Secondary: conceal strength - prefer showing low, non-wild cards.
-                score += wilds.Contains(candidate) ? -50_000 : 0;
-                score -= (int)candidate.Rank * 1_000;
-                // Rookies are a bit random.
+                // Keep diamonds and wilds hidden; showing a high card earns the turn-over pick.
+                if (candidate.Suit == Suit.Diamonds) score -= 60_000;
+                if (wilds.Contains(candidate)) score -= 50_000;
+                score += (int)candidate.Rank * 400 * Aggro;
                 score += _random.NextDouble() * (1 - Profile.Patience) * 20_000;
 
                 if (score > bestScore)
@@ -87,12 +87,46 @@ namespace WildCardPoker.Core.AI
             return best;
         }
 
+        /// <summary>
+        /// Picks a column for the dealer to turn over, or null to pass. Weighs how much each flip could help this
+        /// bot's hand (averaging over the cards that might be hidden there) against keeping the board as it is.
+        /// </summary>
+        public int? ChooseTurnOver(DiamondTurnOverEngine engine)
+        {
+            var seat = engine.Seats[SeatIndex];
+            var unseen = engine.UnseenBy(SeatIndex);
+            var board = engine.Board;
+            double current = Strength(engine, seat, board.FaceUpInRow(1), board.FaceUpInRow(2));
+
+            int? bestColumn = null;
+            double bestGain = 0.04 * (1 - Aggro) + 0.005; // cautious players need a clearer gain
+            for (int col = 0; col < DiamondBoard.Columns; col++)
+            {
+                double total = 0;
+                int samples = Math.Min(10, unseen.Count);
+                for (int i = 0; i < samples; i++)
+                {
+                    var hidden = unseen[_random.Next(unseen.Count)];
+                    BuildRowsAfterFlip(board, col, hidden, out var row1, out var row2);
+                    total += Strength(engine, seat, row1, row2);
+                }
+                double gain = total / Math.Max(1, samples) - current;
+                gain += (_random.NextDouble() - 0.5) * 0.02 * (1 - Profile.Patience);
+                if (gain > bestGain)
+                {
+                    bestGain = gain;
+                    bestColumn = col;
+                }
+            }
+            return bestColumn;
+        }
+
         /// <summary>Chooses a betting action for the bot's turn.</summary>
-        public BotDecision DecideBet(Game23Engine engine, LegalActions legal)
+        public BotDecision DecideBet(DiamondTurnOverEngine engine, LegalActions legal)
         {
             int inHand = engine.Seats.Count(s => s.InHand);
             double equity = Equity(engine);
-            double relative = equity * inHand; // 1.0 = an average share of the pot
+            double relative = equity * inHand;
             double potOdds = legal.ToCall == 0 ? 0 : legal.ToCall / (double)(legal.Pot + legal.ToCall);
 
             double valueThreshold = 1.55 - 0.55 * Aggro;
@@ -101,8 +135,7 @@ namespace WildCardPoker.Core.AI
 
             PlayerAction action;
             string chat = null;
-            bool strong = relative >= valueThreshold;
-            bool raising = legal.CanBetOrRaise && (strong || bluff);
+            bool raising = legal.CanBetOrRaise && (relative >= valueThreshold || bluff);
 
             if (raising)
             {
@@ -130,26 +163,20 @@ namespace WildCardPoker.Core.AI
             return new BotDecision(action, think, chat);
         }
 
-        /// <summary>
-        /// Real players with weak hands and little patience often fold before the action reaches them.
-        /// Call this while someone else has the action.
-        /// </summary>
-        public bool WantsToFoldOutOfTurn(Game23Engine engine)
+        /// <summary>Impatient players with weak hands fold before the action reaches them.</summary>
+        public bool WantsToFoldOutOfTurn(DiamondTurnOverEngine engine)
         {
-            if (engine.Phase != Game23Phase.Betting) return false;
-            var pending = engine.Pending;
-            if (pending.ToAct < 0 || pending.ToAct == SeatIndex) return false;
-            var seat = engine.Seats[SeatIndex];
-            if (!seat.CanAct) return false;
+            if (engine.Phase != Phase.Betting) return false;
+            int toAct = engine.SeatToAct;
+            if (toAct < 0 || toAct == SeatIndex) return false;
+            if (!engine.Seats[SeatIndex].CanAct) return false;
 
             int inHand = engine.Seats.Count(s => s.InHand);
             double relative = Equity(engine) * inHand;
             if (relative > 0.45) return false;
-            double impatience = 1 - Profile.Patience;
-            return _random.NextDouble() < impatience * 0.35;
+            return _random.NextDouble() < (1 - Profile.Patience) * 0.35;
         }
 
-        /// <summary>Update the emotional state after a hand.</summary>
         public void OnHandEnded(long chipsWonOrLost, long startingStack)
         {
             Tilt *= 0.8f;
@@ -164,22 +191,49 @@ namespace WildCardPoker.Core.AI
             }
         }
 
-        /// <summary>Estimated share of the pot this seat wins against the players still in.</summary>
-        public double Equity(Game23Engine engine)
+        public double Equity(DiamondTurnOverEngine engine)
         {
-            var key = (engine.HandNumber, engine.Street, engine.Seats.Count(s => s.InHand),
-                engine.Seats.Sum(s => s.Up.Count));
+            var key = (engine.HandNumber, engine.BettingRoundIndex, engine.Seats.Count(s => s.InHand),
+                engine.Seats.Sum(s => s.Up.Count), string.Join(",", engine.Board.AllFaceUp));
             if (key == _cacheKey) return _cachedEquity;
-            _cachedEquity = Game23Equity.Estimate(engine, SeatIndex, Samples, _random);
+            _cachedEquity = DiamondEquity.Estimate(engine, SeatIndex, Samples, _random);
             _cacheKey = key;
             return _cachedEquity;
+        }
+
+        /// <summary>A 0..1 measure of hand strength (category-based), used to compare turn-over options.</summary>
+        private static double Strength(DiamondTurnOverEngine engine, Seat seat, IReadOnlyList<Card> row1, IReadOnlyList<Card> row2)
+        {
+            var shapes = DiamondTurnOverEngine.ShapesFor(row1, row2, engine.Settings.MaxBoardCards);
+            var wilds = engine.Settings.Wilds.Resolve(new WildContext(seat.Hole, seat.Up, row1.Concat(row2).ToList()));
+            var value = engine.Finder.BestValueOfShapes(seat.PersonalCards.ToList(), shapes, wilds);
+            return value.IsValid ? value.Strength / (double)(10 << 20) : 0;
+        }
+
+        private static void BuildRowsAfterFlip(DiamondBoard board, int column, Card hidden, out List<Card> row1, out List<Card> row2)
+        {
+            row1 = new List<Card>();
+            row2 = new List<Card>();
+            for (int c = 0; c < DiamondBoard.Columns; c++)
+            {
+                bool topUp = board.IsFaceUp(1, c);
+                if (c == column)
+                {
+                    // After the flip the hidden card is up in the other row.
+                    if (topUp) row2.Add(hidden);
+                    else row1.Add(hidden);
+                    continue;
+                }
+                if (topUp) row1.Add(board.CardAt(1, c));
+                else row2.Add(board.CardAt(2, c));
+            }
         }
 
         private long RaiseSize(LegalActions legal, double relative)
         {
             if (legal.MinRaiseTo == legal.MaxRaiseTo) return legal.MinRaiseTo;
             double fraction = 0.45 + 0.6 * Aggro;
-            if (Profile.Archetype == Archetype.Maniac && _random.NextDouble() < 0.25) fraction = 3; // overbet / shove
+            if (Profile.Archetype == Archetype.Maniac && _random.NextDouble() < 0.25) fraction = 3;
             if (relative > 2.2 && _random.NextDouble() < Aggro * 0.3) fraction = 2;
             long target = legal.CurrentBet + (long)Math.Round((legal.Pot + legal.ToCall) * fraction);
             return Math.Max(legal.MinRaiseTo, Math.Min(legal.MaxRaiseTo, target));
@@ -188,8 +242,7 @@ namespace WildCardPoker.Core.AI
         private float ThinkTime(double relative, double closeness, PlayerAction action, ref string chat)
         {
             float baseTime = 0.6f + 1.6f * Profile.Patience;
-            if (closeness < 0.08) baseTime += 1.2f; // close decisions take longer
-
+            if (closeness < 0.08) baseTime += 1.2f;
             if (relative > 2.0)
             {
                 if (_random.NextDouble() < Profile.SnapTell) return 0.25f + (float)_random.NextDouble() * 0.35f;
@@ -199,8 +252,8 @@ namespace WildCardPoker.Core.AI
                     return 3.5f + (float)_random.NextDouble() * 3f;
                 }
             }
-            if (action.Type == ActionType.Fold && relative < 0.4) baseTime *= 0.4f; // trash folds are fast
-            baseTime *= 1f - 0.4f * Tilt;                                           // tilted players act fast
+            if (action.Type == ActionType.Fold && relative < 0.4) baseTime *= 0.4f;
+            baseTime *= 1f - 0.4f * Tilt;
             float noise = 0.8f + (float)_random.NextDouble() * 0.4f;
             return Math.Max(0.25f, baseTime * noise);
         }
@@ -208,31 +261,28 @@ namespace WildCardPoker.Core.AI
         private static float Clamp01(float v) => v < 0 ? 0 : v > 1 ? 1 : v;
     }
 
-    public static class Game23Equity
+    public static class DiamondEquity
     {
         /// <summary>
-        /// Monte Carlo estimate of a seat's pot share. Deals out every unseen card at random (unflipped board,
-        /// opponents' hole cards, future cards) and plays the hand to showdown, many times.
-        /// Future cards are treated as hole cards (an approximation for "in the hole" wild calls).
+        /// Monte Carlo estimate of a seat's pot share: deals the unseen cards (opponents' hole cards and future
+        /// cards) at random and plays to showdown many times. The board is assumed to stay as it is now.
         /// </summary>
-        public static double Estimate(Game23Engine engine, int seatIndex, int samples, IRandomSource random)
+        public static double Estimate(DiamondTurnOverEngine engine, int seatIndex, int samples, IRandomSource random)
         {
             var me = engine.Seats[seatIndex];
             var opponents = engine.Seats.Where(s => s.InHand && s.Index != seatIndex).ToList();
             if (opponents.Count == 0) return 1.0;
 
-            int perPlayer = engine.Settings.InitialHoleCards + engine.Settings.FlipSchedule.Length - 1 +
-                            (engine.Settings.FinalDownCard ? 1 : 0);
-            var unseen = engine.UnseenBy(seatIndex);
-            int needTwo = Game23Board.CardsPerSide - engine.Board.FlippedTwo;
-            int needThree = Game23Board.CardsPerSide - engine.Board.FlippedThree;
+            int perPlayer = engine.Settings.CardsPerPlayer;
             int myFuture = Math.Max(0, perPlayer - me.Hole.Count - me.Up.Count);
-
+            var row1 = engine.Board.FaceUpInRow(1);
+            var row2 = engine.Board.FaceUpInRow(2);
+            var boardUp = engine.Board.AllFaceUp;
+            var shapes = DiamondTurnOverEngine.ShapesFor(row1, row2, engine.Settings.MaxBoardCards);
             var finder = engine.Finder;
             var rules = engine.Settings.HandRules;
-            var call = engine.EffectiveCall;
-            var options = engine.Settings.WildOptions;
-            var pool = unseen.ToArray();
+            var call = engine.Settings.Wilds;
+            var pool = engine.UnseenBy(seatIndex).ToArray();
             double total = 0;
 
             for (int sample = 0; sample < samples; sample++)
@@ -246,13 +296,6 @@ namespace WildCardPoker.Core.AI
                     pool[j] = tmp;
                     return pool[next++];
                 }
-
-                var two = engine.Board.ExposedTwo.ToList();
-                var three = engine.Board.ExposedThree.ToList();
-                for (int i = 0; i < needTwo; i++) two.Add(Draw());
-                for (int i = 0; i < needThree; i++) three.Add(Draw());
-                var board = two.Concat(three).ToList();
-                var shapes = Game23Engine.ShapesFor(two, three);
 
                 var myHole = me.Hole.ToList();
                 for (int i = 0; i < myFuture; i++) myHole.Add(Draw());
@@ -273,9 +316,8 @@ namespace WildCardPoker.Core.AI
 
                 HandValue Value(List<Card> hole, List<Card> up)
                 {
-                    var wilds = call.Resolve(new WildContext(hole, up, board, options));
-                    var personal = hole.Concat(up).ToList();
-                    return finder.BestValueOfShapes(personal, shapes, wilds);
+                    var wilds = call.Resolve(new WildContext(hole, up, boardUp));
+                    return finder.BestValueOfShapes(hole.Concat(up).ToList(), shapes, wilds);
                 }
             }
             return total / samples;

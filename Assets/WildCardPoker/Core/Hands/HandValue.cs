@@ -26,7 +26,7 @@ namespace WildCardPoker.Core
         /// <summary>When two hands are otherwise equal, the one using fewer wild cards wins.</summary>
         public bool NaturalBeatsWild = false;
 
-        /// <summary>Aces may play low in A-2-3-4-5 ("the wheel"). Game 23: aces high or low, player's discretion.</summary>
+        /// <summary>Aces may play low in A-2-3-4-5 ("the wheel").</summary>
         public bool AceLowStraights = true;
 
         public static HandRules Default => new HandRules();
@@ -100,7 +100,7 @@ namespace WildCardPoker.Core
         public IReadOnlyList<Card> PlaysAs { get; }
         public IReadOnlyList<bool> IsWild { get; }
 
-        /// <summary>Which part of the layout the hand came from, e.g. "Two side" in Game 23.</summary>
+        /// <summary>Which part of the layout the hand came from, e.g. "row 1" in Diamond Turn-over.</summary>
         public string Source { get; }
 
         public EvaluatedHand(HandValue value, IReadOnlyList<Card> cards, IReadOnlyList<Card> playsAs,

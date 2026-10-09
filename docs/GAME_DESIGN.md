@@ -1,146 +1,106 @@
-# Wild Card Poker: Game Design Spec
+# Diamond Turn-over: Game Design Spec
 
-This document records the rules as the code implements them. Lines marked **[CONFIRMED]** were answered by
-the designer. Lines marked **[ASSUMED]** are still my reading; each one is a single setting in code.
-See [Open questions](#open-questions).
+This records the rules as the code implements them (`Assets/WildCardPoker/Core/Games/DiamondTurnOver`).
+**[CONFIRMED]** = stated by the designer. **[ASSUMED]** = my reading; each one is a single setting or function,
+listed again under [Open questions](#open-questions).
 
 ---
 
-## 1. Wild card calling
+## At a glance
 
-Before each hand, the dealer **calls** the wild cards. Calling is creative: the dealer can combine any of the
-methods below. Wild cards are worked out **for each player separately**, so the same card can be wild for one
-player and not for another.
-
-### Words used
-
-| Term | Meaning |
+| | |
 |---|---|
-| **In the hole / in the hand** | The cards in the player's hand (face down). **[CONFIRMED]** Rolled cards are on the table, so they are *not* "in the hole". |
-| **Up / rolled** | Cards a player has turned face up. |
-| **On the board** | Shared cards in the middle (the design board in Game 23). |
+| Players | 2–6 (10 board cards + 7 per player fit one deck), plus a **house dealer** |
+| Cards per player | 7: **4 rolled face up, 3 in the hole**. The last card stays down. **[CONFIRMED]** |
+| Wild cards | **Lowest diamond in the hole and all like it**, worked out for each player. **[CONFIRMED]** |
+| Board | Two rows of five, alternating face up and face down |
+| Special move | **Turn-over**: have the dealer turn over a board card |
+| Making a hand | **1, 2, 3 or 4 face-up cards from ONE row**, plus your own cards. Using the board is mandatory. **[CONFIRMED]** |
+| Aces | High or low, player's discretion. **[CONFIRMED]** |
 
-### Calling methods
+## 1. The board
 
-| # | Method | Example call | What becomes wild | Who it applies to |
-|---|---|---|---|---|
-| 1 | **Matching low** | "matching low" | Your lowest card in the hole, **and every card of that value on the board and in your own cards**. Example: your low card is a deuce, so every deuce on the board and in your hand is wild for you. **[CONFIRMED]** | Each player separately: each player's own low card |
-| 2 | **Lowest/highest of a suit** | "lowest diamond in the hole" | Your lowest diamond in the hole. | Each player separately |
-| 2b | ...called on the board | "lowest diamond on the board" | The lowest diamond on the board. | Everyone (it's shared) |
-| 3 | **All like it** | "lowest club in the hole and all like it" | The picked card **plus every card of the same value** on the board and in your own cards. Example: player A's only club is the A♣, so all aces are wild for A. Player B's lowest club is the 3♣, so all treys are wild for B. **[CONFIRMED]** | Each player separately |
-| 4 | **Default (house rule #4)** | "highest club in the hole" | When a lowest/highest card is called, *all like it* applies **unless the caller says "only"** or "no matching low". | n/a |
-| 5 | **"Only"** | "lowest spade in the hole only, and no matching low" | That one card and nothing else. | Each player separately |
-| 6 | **Ranks in a location** | "queens or kings in the hole only" | Q and K in your hole (not on the board, not rolled). | Each player separately |
-| 7 | **Ranks on the board** | "sevens and threes on the board only" | 7s and 3s on the board only. | Everyone |
-| 8 | **Ranks anywhere** | "kings wild", "deuces" | Every card of that rank. | Everyone |
-| 9 | **Named cards** | "one-eyed jacks", "suicide king", "jack of diamonds" | J♠ J♥ / K♥ / J♦ | Everyone |
+The dealer sets up two rows of five **[CONFIRMED]**:
 
-* Calls can be combined with `;`, `+` or "plus": `kings wild; lowest heart in the hole and all like it`.
-* **Ties:** if two cards tie for "lowest card in the hole" (two 5s), both are picked.
-* **No match:** if you have no club in the hole, "lowest club in the hole" gives you no wild card.
-* **Aces when picking "lowest":** aces count high. **[ASSUMED]** (setting: `WildCallOptions.AceLowWhenPicking`).
-* **When wilds are decided:** wilds are worked out again whenever cards move, and are **final after all cards
-  are dealt**, as the rules say. The table shows your current wilds with a gold glow as the hand develops.
+```
+          1      2      3      4      5
+ROW 1    UP    down    UP    down    UP
+ROW 2   down    UP    down    UP    down
+```
 
-### What a wild card can be
-A wild card can stand for **any card, including a duplicate of a card already in the hand**, which is the common
-home-game rule. That makes **Five of a Kind** possible. It ranks above a Royal Flush (setting:
-`HandRules.AllowFiveOfAKind`). Hand ranking, highest first:
+Every column has exactly one card up and one card down, so five board cards are always showing.
 
-Five of a Kind → Straight Flush (Royal) → Four of a Kind → Full House → Flush → Straight → Three of a Kind →
-Two Pair → One Pair → High Card.
+### Turn-over
+When a player points at a card, **the dealer turns over that whole column**. The face-down card comes up and the
+face-up card in the other row goes down. In the designer's example 1 → example 2, the player picks card #4 of row 1.
+Row 1 #4 turns face up and row 2 #4 turns face down. **[ASSUMED: this is my reading of "card number four
+underneath... this card gets turned over".]**
 
-**Natural vs. wild:** two equal hands **tie**, no matter how many wilds each used **[ASSUMED]**. The other common
-rule, natural beats wild, is one setting away: `HandRules.NaturalBeatsWild`.
+That is also why "coming behind" works: a later player can turn over **the same column** again. It flips back
+and the card the first player wanted is dead. **[CONFIRMED]**
 
-### The dealer's call in the app
-* **The player who deals** types the call in plain English (the app understands phrases like the examples
-  above and shows what it understood before dealing) or taps a preset.
-* **Computer dealers** pick a call from the presets.
-* The call is shown on the banner at the top of the table for the whole hand.
+## 2. Dealing a hand
 
----
-
-## 2. Game "23 (MJ)"
-
-### Summary
-A seven-card **rolling** game with a 14-card **design board** laid out as the numerals **2** and **3**.
-**Deuces and treys are always wild** (mandatory), on top of whatever the dealer calls.
-**Aces are high or low**, whichever helps (A-2-3-4-5 straights count).
-
-### Final hand
-Every player ends with **7 cards: 3 down in the hole and 4 rolled face up**. The best five-card hand must be one of:
-
-* **2 cards from the "2" structure + 3 of your own cards**, or
-* **3 cards from the "3" structure + 2 of your own cards.**
-
-You must use the board, and you can't mix the two structures.
-
-**[CONFIRMED]** Using the board is mandatory: exactly 2 cards from the "2" or exactly 3 from the "3".
-Any 2 of the 7 cards on the "2", or any 3 of the 7 on the "3", may be used.
-
-### How a hand is dealt
 | Step | Dealer | Players |
 |---|---|---|
-| 1 | Collects antes. | Ante. |
-| 2 | Lays out the design board: 7 cards face down in the shape of a **2**, 7 in the shape of a **3**. | n/a |
-| 3 | Deals **3 cards** to each player, face down. | n/a |
-| 4 | Turns **2 cards on the 2** and **2 cards on the 3**. | Each player **rolls** one hole card face up, **one by one, starting left of the dealer**. Each roll is shown right away, so later players see it before choosing. **[CONFIRMED]** |
-| 5 | n/a | **Betting round.** |
-| 6 | Deals **1 more card** to each player; turns **2 + 2** more. | Roll one card. Betting round. |
-| 7 | Deals 1 card; turns **2 + 2** more. | Roll one card. Betting round. |
-| 8 | Deals 1 card; turns the **last card on each side (1 + 1)**, so all 14 are up. | Roll the 4th card. Betting round. |
-| 9 | Deals the **last card down**. It stays in the hole. | **Final betting round**, then showdown. |
+| 1 | Collects antes; sets up the board | n/a |
+| 2 | Deals **3 cards** to each player | Each player **rolls** one card face up, one by one from the dealer's left **[ASSUMED: carried over from the previous game]** |
+| 3 | Turns over the column picked, if any | The player with the **highest hand showing** may pick a board card to turn over, or **pass** **[CONFIRMED]** |
+| 4 | n/a | Betting round **[ASSUMED]** |
+| 5 | Deals **1 card** to each player | Roll another card, then repeat steps 3–4 |
+| 6 | Repeats until each player has 4 rolled cards | n/a |
+| 7 | Deals the **last card face down**; it stays in the hole | Hands are not shown yet **[CONFIRMED]** |
+| 8 | Turns over each column picked | **Every player** may turn over a card, from the **highest hand showing down to the lowest**. A player may re-turn a column someone else just turned. **[CONFIRMED]** |
+| 9 | n/a | Final betting round **[ASSUMED]**, then showdown: players call their best hand |
 
-Board cards turned per round: **2, 2, 2, 1** on each side = 7 per side. **[CONFIRMED]**
+**Highest hand showing:** only the face-up rolled cards count: four of a kind > three of a kind > two pair >
+pair > high card. Aces count high. Wilds are ignored, because each player's wild depends on their hidden hole
+cards. Ties go to the player nearest the dealer's left. **[ASSUMED]**
 
-**Player limit:** 14 board cards + 7 per player must fit in one 52-card deck, so the limit is **5 players**.
+## 3. Making a hand
 
-### Betting
-* Structures: **No-Limit, Pot-Limit or Fixed-Limit** (setting). Fixed-limit uses the small bet on rounds 1-2 and
-  the big bet afterwards, with a cap of a bet plus three raises.
-* Betting starts with the first active player **left of the dealer** each round. **[CONFIRMED]**
-* All-ins and side pots follow standard card-room rules. A short all-in raise does not reopen the betting.
+* Five cards: **1 to 4 face-up cards from ROW 1, or 1 to 4 from ROW 2**, plus the rest from your own 7 cards.
+  **[CONFIRMED]**
+* You **cannot** combine cards from both rows. **[CONFIRMED]**
+* At least one board card is mandatory, so a hand made only from your own cards doesn't count. **[CONFIRMED]**
+* The board cards don't have to sit next to each other in the row. **[ASSUMED]**
+* Face-down board cards can't be used.
 
----
+## 4. Wild cards
 
-## 3. Folding out of turn (interactive)
+**Lowest diamond in the hole and all like it.** Your lowest face-down diamond is wild, and so is every card of the
+same rank in your hand, your rolled cards and the board. This is worked out for each player separately.
+*Example:* your lowest hole diamond is the 4♦, so 4♦, your rolled 4♠ and the 4♥ on the board are all wild for you.
+Another player's lowest hole diamond is the 9♦, so their 9s are wild and the 4s are not.
 
-**FOLD can be pressed at any moment** while you're in the hand, whether or not it's your turn, just like a real
-table. The rest of the table sees it right away: the player's cards are mucked, a red "Folded out of turn!"
-bubble appears, and computer players now count one opponent fewer.
+* No diamond in your hole means no wild cards for you.
+* **Aces either way:** the ace may also count as your **lowest** diamond (the A♦ becomes wild, with all aces). The game
+  picks whichever way gives you the better hand. **[ASSUMED: extends "aces high or low, player's discretion"]**
+* A wild can be any card, so **Five of a Kind** is possible and ranks above a Royal Flush.
 
-What the dealer does about it is a table setting (`OutOfTurnFoldPolicy`), based on real card-room practice (an
-out-of-turn fold is binding; dealers warn and floors can penalize repeat offenders):
+## 5. Folding out of turn
+FOLD works at any moment. Folding while another player must roll, pick a turn-over or bet counts as out of turn,
+and the dealer warns the player (setting: `OutOfTurnFoldPolicy`: not allowed, binding, warning, or a penalty
+sit-out).
 
-| Policy | Effect |
+## 6. Flashing cards (table UI)
+| Flash | Meaning |
 |---|---|
-| `NotAllowed` | Strict online style: "Hold on, it's not your turn." The fold is refused. |
-| `AllowedBinding` | The fold stands, and the dealer says nothing. |
-| `AllowedWithWarning` **(default)** | The fold stands; the dealer warns the player ("Please wait for your turn"), and warnings are counted. |
-| `AllowedWithPenalty` | As above, and after N warnings the player **sits out the next hand**. |
+| **Gold**, quick pulse, "WILD" tag | Your wild cards: in your hand, rolled, and on the board |
+| **Blue** outline, slow pulse | The five cards that make up your best hand right now, including the board cards it uses |
+| **White** + flashing **HIGH HAND** tag | The up cards of the player with the highest hand showing (who gets the turn-over) |
 
-Rolling is one by one, so folding while **another player is rolling** is also out of turn. Folding when it is
-your own roll is an in-turn fold, and the roll passes to the next player.
-
-Computer players fold out of turn too. Impatient personalities (the Rookie and the Rock) sometimes fold weak
-hands before the action reaches them, and sometimes apologize: "Oops, my bad."
-
-There are also online-style **pre-action** boxes (*Check/Fold*, *Call any*) that act automatically when your
-turn arrives.
+At showdown each player's winning five flash blue.
 
 ---
 
 ## Open questions
-
-Answered by the designer: "in the hole" (cards in the hand), matching low / all like it (each player's own low
-card, matched on the board and in their own cards), mandatory 2 or 3 board cards, the 2-2-2-1 flip schedule,
-one-by-one rolling, and betting from the dealer's left.
-
-Still open (current behavior in brackets):
-
-1. **Natural vs. wild** ties: split pot, or does the natural hand win? (split pot)
-2. **Five of a Kind**: allowed and above the Royal Flush? (yes)
-3. **Aces when picking "lowest club"**: does an ace count low (1) or high? (high)
-4. **"No matching low" as the default** instead of "all like it" when a lowest/highest card is called? ("all like it",
-   per house rule #4)
+1. **Turn-over = whole column flips?** That's how I read your example 1 → 2. Confirm.
+2. **"Four, three, two or one card in a row"**: does it mean *from one row* (current), or must the cards sit
+   **next to each other** in the row?
+3. **Betting**: a round after each turn-over and one final round before showdown (current). Is that right, or
+   do you want betting at different points?
+4. **Who rolls first**: one by one from the dealer's left (current), or all at the same time?
+5. **Highest hand showing**: pairs and trips of the face-up cards, ties to the dealer's left (current). OK?
+6. **Ace as the lowest diamond**: allowed at the player's discretion (current)?
+7. **Natural vs. wild ties** and **Five of a Kind**: currently split pot and allowed.

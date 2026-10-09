@@ -1,26 +1,36 @@
-# Wild Card Poker
+# Wild Card Poker: Diamond Turn-over
 
-A Unity poker game built around **dealer's-choice wild card calling** and the original rolling game **"23 (MJ)"**:
-a seven-card game played over a 14-card design board shaped like the numerals **2** and **3**.
+A Unity poker game. The current game is **Diamond Turn-over**: a seven-card game with a two-row board where
+players can have the dealer **turn over** board cards. The lowest diamond in each player's hole, and all like it,
+is wild.
 
-* **Rules:** [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md) (wild card calling, Game 23, folding out of turn, open questions)
+* **Rules:** [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md) (board, turn-over, making a hand, wild cards, open questions)
 * **Research:** [docs/RESEARCH.md](docs/RESEARCH.md) (real player behavior, popular apps, roadmap)
 
 ## Features
-* **Wild card calling engine.** Matching low, lowest/highest of a suit, *all like it*, *only*, ranks in the hole /
-  on the board, named cards (one-eyed jacks, suicide king), combined calls. Wilds are worked out for each player
-  separately. The dealer can **type a call in plain English** and see what it means before dealing.
-* **Hand evaluator** that handles any number of wild cards, including Five of a Kind, plus house rules (natural
-  beats wild, five of a kind allowed). It is checked against a brute-force solver.
-* **Game 23 engine:** design board, rolling cards, 2-side/3-side hand rule, mandatory deuces and treys,
-  No-Limit / Pot-Limit / Fixed-Limit betting, side pots.
-* **Fold out of turn:** press FOLD any time. The dealer warns or penalizes according to a table setting, and
-  computer players do it too.
-* **Computer players with personalities** (Shark, Rookie, Maniac, Rock, Calling Station, Wildcat). They
-  estimate hand strength by simulation with the wild call applied, and have timing tells, tilt and table talk.
-* **Polished table built entirely in code**: rail, felt, card faces and backs, chips, gold wild glow, deal, flip
-  and roll animations, speech bubbles, dealer log, smart bet controls and pre-action boxes. No imported assets
-  are needed, and all art is centralized in `Theme` so commissioned art can replace it.
+* **Diamond Turn-over engine:**
+  * a 2×5 board (up/down/up/down/up over down/up/down/up/down);
+  * turn-overs that flip a whole column;
+  * the highest hand showing picks after each roll, and everyone picks in the final round;
+  * hands use 1–4 cards from ONE row;
+  * the last card stays down.
+* **Wild card engine:** lowest diamond in the hole and all like it, worked out for each player; the ace can count as
+  the lowest diamond at the player's discretion. The general wild-calling system (matching low, "all like it",
+  "only", calls typed in plain English) remains available for future games.
+* **Hand evaluator** for any number of wild cards, including Five of a Kind, checked against a brute-force solver.
+* **Betting:** No-Limit, Pot-Limit or Fixed-Limit, with side pots and online-style pre-action boxes.
+* **Fold out of turn** at any moment, with the dealer's warning or penalty policy.
+* **Computer players with personalities.** They:
+  * decide turn-overs;
+  * estimate hand strength by simulation;
+  * give away timing tells, go on tilt and talk at the table.
+* **Flashing cards:** gold for your wild cards, blue for your best hand, white plus a "HIGH HAND" tag for the
+  highest hand showing.
+* **Table built entirely in code:**
+  * a house dealer with a chip rack and shoe, and six seats;
+  * the board with row and column labels;
+  * deal, roll and turn-over animations.
+* **Design mockup:** a matching table layout on a claude.ai design canvas.
 
 ## Run it
 1. Install **Unity 6** (6000.0 LTS) via Unity Hub.
@@ -50,12 +60,12 @@ Assets/WildCardPoker/
     Hands/              Wild-aware evaluator, best-hand search
     Wild/               Wild card calls, per-player resolution, plain-English parser
     Table/              Seats, betting rounds, side pots, pre-actions, game events
-    Games/Game23/       The 23 (MJ) board and engine
+    Games/DiamondTurnOver/  Diamond Turn-over board and engine
     AI/                 Player profiles, bots, Monte Carlo equity
   Runtime/              Unity presentation (WildCardPoker.Runtime.asmdef)
     Art/                Procedural sprites + Theme
     Table/              TableController, CardView, SeatView, BoardLayout
-    UI/                 ActionBar, WildCallPanel, uGUI helpers
+    UI/                 ActionBar, uGUI helpers
   Tests/EditMode/       NUnit tests (Unity Test Runner + dotnet)
 tools/CoreTests/        dotnet test project for the engine
 docs/                   Design spec and research

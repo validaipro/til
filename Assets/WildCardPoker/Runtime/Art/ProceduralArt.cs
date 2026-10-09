@@ -168,6 +168,12 @@ namespace WildCardPoker.Unity
         public static readonly Color Rail = new Color(0.20f, 0.11f, 0.06f);
         public static readonly Color Gold = new Color(0.96f, 0.78f, 0.30f);
         public static readonly Color WildGlow = new Color(1f, 0.82f, 0.15f, 0.95f);
+
+        /// <summary>Flashing outline on the cards that make up your current best hand.</summary>
+        public static readonly Color BestHandGlow = new Color(0.35f, 0.78f, 1f, 0.9f);
+
+        /// <summary>Flashing outline on the up cards of the highest hand showing at the table.</summary>
+        public static readonly Color HighHandGlow = new Color(1f, 1f, 1f, 0.85f);
         public static readonly Color CardRed = new Color(0.80f, 0.08f, 0.12f);
         public static readonly Color CardBlack = new Color(0.08f, 0.08f, 0.10f);
         public static readonly Color PanelBg = new Color(0f, 0f, 0f, 0.55f);

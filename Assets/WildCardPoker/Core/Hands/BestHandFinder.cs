@@ -44,7 +44,7 @@ namespace WildCardPoker.Core
 
     /// <summary>
     /// One way of building a 5-card hand: take exactly <see cref="PersonalCount"/> of the player's own cards
-    /// and exactly <see cref="SharedCount"/> cards from one shared group (e.g. one side of the Game 23 board).
+    /// and exactly <see cref="SharedCount"/> cards from one shared group (e.g. one row of the Diamond Turn-over board).
     /// </summary>
     public sealed class HandShape
     {
